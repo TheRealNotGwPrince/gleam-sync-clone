@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, MessageCircle, Users, Settings, LogOut } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { SettingsModal } from "./SettingsModal";
 
 interface Profile {
   id: string;
@@ -30,17 +31,21 @@ export function ChatSidebar({ currentUser, onSelectChat, selectedUserId }: ChatS
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     fetchProfiles();
     
-    // Subscribe to profiles changes
+    // Subscribe to profiles changes for real-time updates
     const subscription = supabase
-      .channel('profiles-changes')
+      .channel('profiles-realtime')
       .on('postgres_changes', 
         { event: '*', schema: 'public', table: 'profiles' },
-        () => fetchProfiles()
+        (payload) => {
+          console.log('Profile changed:', payload);
+          fetchProfiles(); // Refetch to get latest data
+        }
       )
       .subscribe();
 
@@ -110,7 +115,7 @@ export function ChatSidebar({ currentUser, onSelectChat, selectedUserId }: ChatS
             <h2 className="text-lg font-semibold">ChatVibe</h2>
           </div>
           <div className="flex items-center space-x-2">
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" onClick={() => setSettingsOpen(true)}>
               <Settings className="h-4 w-4" />
             </Button>
             <Button variant="ghost" size="sm" onClick={handleSignOut}>
@@ -190,6 +195,12 @@ export function ChatSidebar({ currentUser, onSelectChat, selectedUserId }: ChatS
           )}
         </div>
       </ScrollArea>
+      
+      <SettingsModal 
+        open={settingsOpen} 
+        onOpenChange={setSettingsOpen} 
+        currentUser={currentUser} 
+      />
     </div>
   );
 }

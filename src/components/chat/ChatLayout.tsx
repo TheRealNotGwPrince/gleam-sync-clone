@@ -25,16 +25,53 @@ export function ChatLayout({ currentUser }: ChatLayoutProps) {
     // Update user status to online when component mounts
     updateUserStatus('online');
 
+    // Set up presence tracking for real-time status updates
+    const presenceChannel = supabase.channel('user-presence');
+    
+    presenceChannel
+      .on('presence', { event: 'sync' }, () => {
+        const newState = presenceChannel.presenceState();
+        console.log('Presence sync:', newState);
+      })
+      .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+        console.log('User joined:', key, newPresences);
+      })
+      .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+        console.log('User left:', key, leftPresences);
+      })
+      .subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          // Track user presence
+          await presenceChannel.track({
+            user_id: currentUser.id,
+            online_at: new Date().toISOString(),
+            status: 'online'
+          });
+        }
+      });
+
     // Update status to offline when user leaves
     const handleBeforeUnload = () => {
       updateUserStatus('offline');
     };
 
+    // Handle visibility change for better status tracking
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        updateUserStatus('away');
+      } else {
+        updateUserStatus('online');
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       updateUserStatus('offline');
+      presenceChannel.unsubscribe();
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [currentUser.id]);
 

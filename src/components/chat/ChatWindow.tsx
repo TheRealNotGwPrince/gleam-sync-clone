@@ -6,9 +6,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { Send, Phone, Video, MoreVertical } from "lucide-react";
+import { Send, Phone, Video, MoreVertical, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { encryptMessage, decryptMessage } from "@/lib/encryption";
 
 interface Message {
   id: string;
@@ -44,9 +45,9 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
   useEffect(() => {
     fetchMessages();
     
-    // Subscribe to new messages
+    // Subscribe to new messages for REAL-TIME updates
     const subscription = supabase
-      .channel('chat-messages')
+      .channel(`chat-${currentUser.id}-${selectedProfile.user_id}`)
       .on('postgres_changes', 
         { 
           event: 'INSERT', 
@@ -55,15 +56,21 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
           filter: `or(and(sender_id.eq.${currentUser.id},receiver_id.eq.${selectedProfile.user_id}),and(sender_id.eq.${selectedProfile.user_id},receiver_id.eq.${currentUser.id}))`
         },
         (payload) => {
+          console.log('New message received:', payload);
           const newMessage = payload.new as Message;
-          setMessages(prev => [...prev, newMessage]);
+          setMessages(prev => {
+            // Avoid duplicates
+            const exists = prev.find(msg => msg.id === newMessage.id);
+            if (exists) return prev;
+            return [...prev, newMessage];
+          });
         }
       )
       .subscribe();
 
-    // Subscribe to typing status
+    // Subscribe to typing status for REAL-TIME typing indicators
     const typingSubscription = supabase
-      .channel('typing-status')
+      .channel(`typing-${currentUser.id}-${selectedProfile.user_id}`)
       .on('postgres_changes',
         {
           event: '*',
@@ -72,6 +79,7 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
           filter: `and(user_id.eq.${selectedProfile.user_id},conversation_with.eq.${currentUser.id})`
         },
         (payload) => {
+          console.log('Typing status changed:', payload);
           if (payload.new) {
             setIsTyping((payload.new as any).is_typing);
           }
@@ -114,12 +122,15 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
 
     setLoading(true);
     try {
+      // Encrypt message before sending
+      const encryptedContent = encryptMessage(newMessage.trim());
+      
       const { error } = await supabase
         .from('direct_messages')
         .insert({
           sender_id: currentUser.id,
           receiver_id: selectedProfile.user_id,
-          content: newMessage.trim(),
+          content: encryptedContent, // Store encrypted content
         });
 
       if (error) throw error;
@@ -201,7 +212,10 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
               <div className={`absolute -bottom-1 -right-1 w-3 h-3 ${getStatusColor(selectedProfile.status)} rounded-full border-2 border-card`}></div>
             </div>
             <div>
-              <h3 className="font-semibold">{selectedProfile.display_name || selectedProfile.username}</h3>
+              <h3 className="font-semibold flex items-center space-x-2">
+                <span>{selectedProfile.display_name || selectedProfile.username}</span>
+                <Shield className="h-4 w-4 text-green-500" />
+              </h3>
               <p className="text-sm text-muted-foreground">
                 {selectedProfile.status === 'online' ? 'Online' : 'Last seen recently'}
               </p>
@@ -239,7 +253,7 @@ export function ChatWindow({ currentUser, selectedProfile }: ChatWindowProps) {
                         ? 'bg-chat-bubble-user text-primary-foreground ml-auto' 
                         : 'bg-chat-bubble-other'
                     }`}>
-                      <p className="text-sm">{message.content}</p>
+                      <p className="text-sm">{decryptMessage(message.content)}</p>
                       <p className={`text-xs mt-1 ${
                         isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground'
                       }`}>
